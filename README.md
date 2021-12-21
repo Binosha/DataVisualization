@@ -1,2 +1,13 @@
-# DataVisualization
-Data Visualization for the UM Library test project
+
+
+
+
+
+
+Start the server:
+
+```
+node index.js
+```
+
+

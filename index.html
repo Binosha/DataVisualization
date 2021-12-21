@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Assignment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="author" content="colorlib.com">
+
+  <!-- MATERIAL DESIGN ICONIC FONT -->
+  <link rel="stylesheet" href="fonts/material-design-iconic-font/css/material-design-iconic-font.css">
+
+  <!-- STYLE CSS -->
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/bootstrap.min.css">
+  <script src="js/jquery-3.3.1.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.11.3/css/jquery.dataTables.min.css">
+  <!-- JQUERY VALIDATE -->
+  <script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script>
+  <script src='https://ajax.aspnetcdn.com/ajax/jquery.validate/1.15.0/jquery.validate.js'></script>
+  <!-- JQUERY STEP -->
+  <script src="js/jquery.steps.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.6.0/dist/chart.min.js"></script>
+  <script src="js/main.js"></script>
+  <script src="js/bootstrap.min.js"></script>
+</head>
+
+<body onload="getData();">
+  <h1> Thesis Overview </h1>
+  <div id="loading-div" style="margin-top: 50px;">
+    <center>
+      <img src="images/loading.gif" />
+      <h2>Please wait while loading the data...</h2>
+    </center>
+  </div>
+  <div>
+    <table class="table" id="dataTable" style="display: none;">
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Author</th>
+          <th scope="col">Language</th>
+          <th scope="col">Year</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+      </tbody>
+    </table>
+  </div>
+
+  <div id="myChartDiv" style="width: 1200px; height: auto; margin-top: 50px; display: none;">
+    <canvas id="myChart" width="600" height="400"></canvas>
+  </div>
+  <div id="myLangChartDiv" style="width: 600px; height: auto; margin-top: 50px; display: none;">
+    <canvas id="myLangChart" width="600" height="400"></canvas>
+  </div>
+
+  <table class="table" id="dataTableThesisByOrg" style="margin-top: 50px; display: none;">
+    <thead>
+      <tr>
+        <th scope="col">Organizational Unit</th>
+        <th scope="col">No. of Thesis</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+    </tbody>
+  </table>
+  </div>
+
+  <script>
+    // this function is called on the body.load method
+    function getData() {
+      const xhr = new XMLHttpRequest();
+      const url = 'https://hidden-eyrie-25204.herokuapp.com/https://crisapi.library.maastrichtuniversity.nl/api/ResearchOutput?types=/dk/atira/pure/researchoutput/researchoutputtypes/thesis/doc&year_begin=2010&year_end=2020&extra=personAssociations,publicationStatuses&size=5000';
+
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState == XMLHttpRequest.DONE) {
+          $.ajax({
+            type: "POST",
+            url: '/analyze_data',
+            data: { "xmldata": xhr.responseText },
+            success: function (res) {
+              var jsonOb = JSON.parse(res.data);
+              analyzeData(jsonOb)
+            },
+          });
+        }
+      }
+      xhr.open('GET', url, true); // Async GET Request
+      xhr.setRequestHeader("UBKey", "86vE6mTnVHLL6zVeXYmCmgn2bdmPHLDy")
+      xhr.send(null);
+    }
+
+    function analyzeData(jsonOb) {
+      thesis_formatted = []
+
+      console.log(jsonOb.result.items)
+      jsonOb.result.items.thesis.forEach(thesis => {
+        var obj = new Object();
+        obj.title = thesis.title["$t"];
+        var lang_code = thesis.language.uri.split('/').at(-1);
+        if (lang_code == "en_GB") {
+          obj.language = "English"
+        }
+        else if (lang_code == "nl_NL") {
+          obj.language = "Dutch"
+        }
+        else if (lang_code == "fr_FR") {
+          obj.language = "French"
+        }
+        else if (lang_code == "de_DE") {
+          obj.language = "German"
+        }
+        else {
+          console.log(thesis.language.uri.split('/').at(-1));
+        }
+        if (thesis.publicationStatuses.publicationStatus.publicationDate) {
+          obj.published_year = thesis.publicationStatuses.publicationStatus.publicationDate.year;
+          obj.published_month = thesis.publicationStatuses.publicationStatus.publicationDate.month;
+        }
+        if (thesis.personAssociations.personAssociation.name) {
+          obj.author_name = thesis.personAssociations.personAssociation.name.firstName + " " + thesis.personAssociations.personAssociation.name.lastName;
+        }
+
+
+        var orgUnitDetails = [];
+        if (thesis.personAssociations.personAssociation.organisationalUnits) {
+          var orgUnits = thesis.personAssociations.personAssociation.organisationalUnits.organisationalUnit
+          if (Array.isArray(orgUnits)) {
+            orgUnits.forEach(orgUnit => {
+              var unitObj = new Object();
+              unitObj.unitName = orgUnit.name.text["$t"];
+              orgUnitDetails.push(unitObj);
+            })
+          }
+          else {
+            var unitObj = new Object();
+            unitObj.unitName = orgUnits.name.text["$t"];
+            orgUnitDetails.push(unitObj);
+          }
+        }
+
+        obj.organization_units = orgUnitDetails;
+
+        thesis_formatted.push(obj)
+      });
+      console.log(thesis_formatted);
+      thesisByDepartment(thesis_formatted);
+      createChartPerYear(thesis_formatted);
+      createChartPerLang(thesis_formatted);
+      createTable(thesis_formatted);
+      hideLoadingScreen();
+    }
+
+    function createChartPerYear(thesis_formatted) {
+      const ctx = document.getElementById('myChart').getContext('2d');
+      const myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ['2010', '2011', '2012', '2013', '2014', '2015', '2016', '2017', '2018', '2019', '2020', '2021'],
+          datasets: [{
+            label: '# of thesis',
+            data: countThesisPerYear(thesis_formatted),
+            backgroundColor: [
+              'rgba(255, 99, 132, 0.2)',
+            ],
+            borderColor: [
+              'rgba(255, 99, 132, 1)',
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+
+            }
+          }
+        }
+      });
+    }
+
+    function createChartPerLang(thesis_formatted) {
+      const ctx = document.getElementById('myLangChart').getContext('2d');
+      const myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['English', 'Dutch', 'French', 'German', 'Other'],
+          datasets: [{
+            label: '# of thesis',
+            data: countThesisPerLang(thesis_formatted),
+            backgroundColor: [
+              'rgba(255, 99, 132, 0.2)',
+            ],
+            borderColor: [
+              'rgba(255, 99, 132, 1)',
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+
+            }
+          }
+        }
+      });
+    }
+
+    function createTable(thesis_formatted) {
+      thesis_formatted.forEach(thesis => {
+        var row = "";
+        row += "<tr>"
+        row += "<td>" + thesis.title + "</td>"
+        row += "<td>" + thesis.author_name + "</td>"
+        row += "<td>" + thesis.language + "</td>"
+        row += "<td>" + thesis.published_year + "</td>"
+        row += "</tr>"
+        $("#dataTable tbody").append(row);
+      })
+
+      $('#dataTable').DataTable();
+    }
+
+    function createTableThesisByOrg(thesisByOrg) {
+      Object.entries(thesisByOrg).forEach(([key, value]) => {
+        var row = "";
+        row += "<tr>"
+        row += "<td>" + key + "</td>"
+        row += "<td>" + value + "</td>"
+        row += "</tr>"
+        $("#dataTableThesisByOrg tbody").append(row);
+      });
+
+      $('#dataTableThesisByOrg').DataTable();
+    }
+
+    function countThesisPerLang(thesis_formatted) {
+      var data_array = [0, 0, 0, 0, 0]
+      thesis_formatted.forEach(thesis => {
+        if (thesis.language == "English") {
+          data_array[0] += 1
+        }
+        else if (thesis.language == "Dutch") {
+          data_array[1] += 1
+        }
+        else if (thesis.language == "French") {
+          data_array[2] += 1
+        }
+        else if (thesis.language == "German") {
+          data_array[3] += 1
+        }
+        else {
+          data_array[4] += 1
+        }
+      })
+      console.log(data_array)
+      return data_array;
+    }
+
+    function countThesisPerYear(thesis_formatted) {
+      var data_array = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      thesis_formatted.forEach(thesis => {
+        if (thesis.published_year == "2010") {
+          data_array[0] += 1
+        }
+        else if (thesis.published_year == "2011") {
+          data_array[1] += 1
+        }
+        else if (thesis.published_year == "2012") {
+          data_array[2] += 1
+        }
+        else if (thesis.published_year == "2013") {
+          data_array[3] += 1
+        }
+        else if (thesis.published_year == "2014") {
+          data_array[4] += 1
+        }
+        else if (thesis.published_year == "2015") {
+          data_array[5] += 1
+        }
+        else if (thesis.published_year == "2016") {
+          data_array[6] += 1
+        }
+        else if (thesis.published_year == "2017") {
+          data_array[7] += 1
+        }
+        else if (thesis.published_year == "2018") {
+          data_array[8] += 1
+        }
+        else if (thesis.published_year == "2019") {
+          data_array[9] += 1
+        }
+        else if (thesis.published_year == "2020") {
+          data_array[10] += 1
+        }
+      })
+      console.log(data_array)
+      return data_array;
+    }
+
+    function thesisByDepartment(thesis_formatted) {
+      var thesisByDept = new Object();
+      thesis_formatted.forEach(thesis => {
+        thesis.organization_units.forEach(orgUnit => {
+          if (orgUnit.unitName) {
+            if (thesisByDept[orgUnit.unitName]) {
+              var currentCount = thesisByDept[orgUnit.unitName];
+              thesisByDept[orgUnit.unitName] = currentCount + 1;
+            }
+            else {
+              thesisByDept[orgUnit.unitName] = 1;
+            }
+          }
+        })
+
+      });
+      createTableThesisByOrg(thesisByDept);
+    }
+
+    function hideLoadingScreen(){
+      $("#loading-div").attr("style", "display: none");
+      $("#dataTableThesisByOrg").attr("style", "margin-top: 50px;");
+      $("#dataTable").attr("style", "");
+      $("#myChartDiv").attr("style", "width: 1200px; height: auto; margin-top: 50px;");
+      $("#myLangChartDiv").attr("style", "width: 600px; height: auto; margin-top: 50px;");
+    }
+
+  </script>
+</body>
+
+</html>
